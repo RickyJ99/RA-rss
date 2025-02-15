@@ -8,3 +8,4 @@ dependencies:
   - panda
   - smtplib
   - dotenv
+  - tabulate
