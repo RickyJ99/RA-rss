@@ -1,0 +1,10 @@
+name: ra
+channels:
+  - defaults
+dependencies:
+  - python=3.12
+  - requests
+  - beautifulsoup4
+  - panda
+  - smtplib
+  - dotenv
