@@ -1,29 +1,61 @@
-import requests
-import certifi
-from bs4 import BeautifulSoup
-import re
-import csv
-import os
-import pandas as pd
-import smtplib
-from email.mime.text import MIMEText
-from IPython.display import Markdown, display
-from email.mime.multipart import MIMEMultipart
-from dotenv import load_dotenv
+# %% [markdown]
+# # Web scraping to generate RSS feed for new positions in economics
+# This application is using three main sources to retrieve information about the new job posts:
+# 1. [NBER](https://www.nber.org/career-resources/research-assistant-positions-not-nber)
+# 2. [Predoc](https://predoc.org/opportunities)
+# 3. [EconJobMarket](https://econjobmarket.org/market)
+#
+# The packeges that are needed are **requests**, **beautifulsoup4**,**MIMEtext**. As a first step we recall them:
+#
+
+# %%
+import xml.etree.ElementTree as ET  # For XML handling
+import requests  # For HTTP requests
+import certifi  # For SSL certification verification
+from bs4 import BeautifulSoup  # For web scraping
+import re  # For regular expressions
+import os  # For file and environment variable management
+import pandas as pd  # For data manipulation
+import smtplib  # For sending emails
+from email.mime.text import MIMEText  # For constructing email messages
+from email.mime.multipart import MIMEMultipart  # For handling email attachments
+from IPython.display import Markdown, display  # For displaying tables in Jupyter
+from dotenv import load_dotenv  # For loading environment variables
+import urllib3  # For managing HTTP connections
+import subprocess
+
+# Suppress SSL warnings for sites with invalid certificates (if necessary)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Load environment variables from .env file
-load_dotenv()  # just for email and password
+load_dotenv()  # For email credentials (SENDER_EMAIL, SENDER_PASSWORD)
 
-CSV_FILE = "jobs.csv"  # database saved in simple csv file
+
+# %%
+
 PREDOC_URL = "https://predoc.org/opportunities"
 NBER_URL = "https://www.nber.org/career-resources/research-assistant-positions-not-nber"
 EJM_URL = "https://econjobmarket.org/market"
+XML_FILE = "jobs.xml"
 
 
-#!mkdir -p sources
-#!curl -L "https://predoc.org/opportunities" -o "sources/predoc.html"
+# %% [markdown]
+# ## Downloading the html
+# The following functions are downloading the HTML content from the sources and it save it in the foulder sources.
+# For PREDOC there is a issue with certificate so it is easy to use curl (bash MacOS)
+
+# %%
+# Ensure the "sources" directory exists
+os.makedirs("sources", exist_ok=True)
+
+# Download the HTML file using curl
+subprocess.run(
+    ["curl", "-L", "https://predoc.org/opportunities", "-o", "sources/predoc.html"],
+    check=True,
+)
 
 
+# %%
 def download_html(url, filename):
     """
     Downloads the HTML content from the given URL and saves it to the specified filename.
@@ -47,6 +79,27 @@ download_html(NBER_URL, "sources/nber.html")
 download_html(EJM_URL, "sources/ejm.html")
 
 
+# %% [markdown]
+# ## Extract Main Field Helper Function 🔑
+#
+# The `extract_main_field` function analyzes a given text to determine which research fields are mentioned. It searches for multiple keywords in a **case-insensitive** manner. If one or more keywords are found, it returns them as a comma‑separated string. If "N/A" are found, it returns `"N/A"`.
+#
+# ### Keywords Included:
+# - **Economics**
+# - **Macroeconomics**
+# - **Microeconomics**
+# - **Labour**
+# - **Industrial Organization**
+# - **Enterpreneurship**
+# - **Healthcare**
+# - **Discrimination**
+# - **Finance**
+# - **Public Policy**
+#
+# You can extend this list with additional fields in economics as needed.
+
+
+# %%
 def extract_main_field(text):
     """
     Looks for keywords in the provided text.
@@ -83,6 +136,29 @@ def extract_main_field(text):
         return None
 
 
+# %% [markdown]
+# **Function: `extract_program_type(text)`**
+#
+# - **Purpose:**
+#   This function takes a string as input (which might be a job title or description) and determines the program type based on certain keywords.
+#
+# - **How It Works:**
+#   1. **Convert to Lowercase:**
+#      The input text is converted to lowercase to ensure case-insensitive matching.
+#   2. **Keyword Checks:**
+#      - If the text contains any variation of "predoctoral" (e.g., "predoctoral", "pre doc", "pre-doc", "predoc"), it returns **"PreDoctoral Program"**.
+#      - If the text contains any variation of "postdoc" (e.g., "postdoc", "post doc", "post-doc", "postdoctoral", "post doctoral"), it returns **"Post Doc"**.
+#      - If the text contains "phd" or "ph.d", it returns **"PhD"**.
+#      - If the text mentions "research assistant" or even "ra" (for example, in abbreviated or extensive form), it returns **"Research Assistant"**.
+#   3. **Default Category:**
+#      If "N/A" of the keywords are found, the function defaults to returning **"Research Assistant"**.
+#
+#
+#
+#
+
+
+# %%
 def extract_program_type(text):
     """
     Analyzes the provided text (e.g., a job title or description) to determine the program type.
@@ -123,6 +199,38 @@ def extract_program_type(text):
         return "Research Assistant"
 
 
+# %% [markdown]
+#
+#
+# ## Web Scraping Section 🚀
+#
+# In this section, we set up our web scraping functionality. Our goal is to **extract job details** from pre-doctoral opportunities pages (in this example, from [predoc.org](https://predoc.org/opportunities)). We assume that the HTML content has already been downloaded and saved locally in the `sources` folder.
+#
+# ### Predoc
+# What This Section Does:
+# - **Reads the Local HTML File 📂:**
+#   We read the downloaded HTML file (`sources/predoc.html`). If the file isn't found, the code prompts you to download it first.
+#
+# - **Parses the HTML Content 🥣:**
+#   Using BeautifulSoup, the code parses the HTML to locate the container that holds the opportunity details.
+#
+# - **Extracts Key Information 🔍:**
+#   For each job posting, the function extracts:
+#   - **Program Title** and **Link** from the `<h2>` element.
+#   - Additional details (like **sponsor**, **institution**, **fields of research**, and **deadline**) from the "copy" `<div>`.
+#
+# - **Determines the Main Field 🔑:**
+#   It combines several text fields and passes them to an auxiliary function (`extract_main_field()`) that determines the primary focus (e.g., Economics, Microeconomics, Finance, etc.).
+#
+# - **Returns the Data as a List 📤:**
+#   Each job is stored as a dictionary, and the function returns a list of these dictionaries.
+#
+# > **Note:**
+# > Make sure to download the HTML file before running the scraper (therefore run the previous chunks).
+#
+
+
+# %%
 def scrape_predoc():
     """
     Scrapes the pre-doctoral opportunities page from the local HTML file
@@ -233,7 +341,41 @@ def scrape_predoc():
 df = pd.DataFrame(scrape_predoc()).head(10).to_markdown(index=False)
 display(Markdown(df))
 
+# %% [markdown]
+# # Web Scraping Section for NBER (Local HTML) 🔎
+#
+# In this section, we extract job details from the locally saved NBER page HTML file. The function follows these steps:
+#
+# - **📂 Read the Local HTML File:**
+#   The function attempts to read `sources/nber.html`. If the file isn't found, it prints an error message and returns an empty list.
+#
+# - **🥣 Parse HTML with BeautifulSoup:**
+#   The HTML content is parsed so we can navigate and extract the data.
+#
+# - **🔍 Locate the Container:**
+#   It finds the `<div>` with class `page-header__intro-inner` that holds the job details.
+#
+# - **✂️ Skip Header Paragraphs:**
+#   The first three `<p>` elements are skipped as they contain header information.
+#
+# - **📋 Extract Job Details:**
+#   For each job posting, the function extracts:
+#   - Program title
+#   - Sponsor
+#   - Institution
+#   - Fields of research
+#   - Job link
+#   If any of these details are missing, it defaults to `"N/A"`.
+#
+# - **🔑 Determine Main Field:**
+#   It combines relevant text and uses the helper function `extract_main_field()` (which should be defined elsewhere) to determine the primary research area.
+#
+# - **✅ Return the Jobs List:**
+#   Finally, all extracted job entries are stored in a list and returned.
+#
 
+
+# %%
 def scrape_nber():
     """
     Scrapes the NBER research assistant positions page from a local HTML file
@@ -317,7 +459,37 @@ def scrape_nber():
 df = pd.DataFrame(scrape_nber()).head(10).to_markdown(index=False)
 display(Markdown(df))
 
+# %% [markdown]
+# ### Web Scraping Section for EJM (Econ Job Market) 🔎
+#
+# This function is designed to scrape job postings from the Econ Job Market (EJM) page. It performs the following tasks:
+#
+# - **🌐 Fetching the Page:**
+#   It sends an HTTP GET request to the EJM URL using the `requests` library.
+#
+# - **🥣 Parsing HTML:**
+#   The response content is parsed with BeautifulSoup to create a DOM structure for extraction.
+#
+# - **🔍 Locating Job Panels:**
+#   It finds all `<div>` elements with the classes `"panel panel-info"`, each representing a job posting.
+#
+# - **🏷️ Extracting Job Details:**
+#   For each panel, it extracts:
+#   - **Job Title & Link:** Located within an `<a>` tag with an ID starting with "title-".
+#   - **University & Program Type:** Extracted from `<div>` elements with class `"col-md-4"` and `"col-md-2"`, respectively.
+#   - **Publication Date & Deadline:** Extracted from `<div>` elements with class `"col-md-2"`.
+#   - **Default Values:** Fields such as **sponsor**, **institution**, and **fields** are set to `"N/A"` since they're not provided.
+#
+# - **🔑 Determining the Main Field:**
+#   It combines the program title and university information to deduce the primary research field using the helper function `extract_main_field()`.
+#
+# - **✅ Building the Result List:**
+#   Each job is stored as a dictionary, and all such dictionaries are appended to a list which is then returned.
+#
+#
 
+
+# %%
 def scrape_ejm():
     """
     Scrapes the Econ Job Market (EJM) page and extracts detailed job information
@@ -554,135 +726,161 @@ df = pd.DataFrame(scrape_ejm()).head(10).to_markdown(index=False)
 
 display(Markdown(df))
 
+# %% [markdown]
+# ## CSV & Email Handling Section 📊✉️
+#
+# This section contains helper functions to manage your job database and send email notifications when new opportunities are detected.
+#
+# ### 1. Reading Existing Jobs from a CSV File 📂
+#
+# The `read_existing_jobs()` function reads a CSV file that contains saved job listings and returns a **set** of job links that are already recorded.
+# - It checks if the file exists.
+# - It uses Python's `csv.DictReader` to iterate over rows and collects the "link" field for each job.
+#
+# ### 2. Appending New Jobs to the CSV File 💾
+#
+# The `append_jobs_to_csv()` function takes a list of job dictionaries and appends them to the specified CSV file.
+# - If the CSV file doesn't exist, it creates the file and writes the header.
+# - It then appends each job as a new row.
+#
+# ### 3. Sending Email Notifications ✉️
+#
+# - **Purpose:**
+#   This function sends an email notification whenever new job records are found.
+#   - **Single Record:** The subject is set to the university name from that record.
+#   - **Multiple Records:** The subject lists the unique university names (e.g., "University A, University B").
+#
+# - **Email Body:**
+#   The email body is constructed as an HTML document with a styled table that lists:
+#   - **Source** (e.g., "predoc", "nber", "ejm")
+#   - **Program Title**
+#   - **Clickable Link** (each link is rendered as a clickable hyperlink)
+#   - **Sponsor**
+#   - **Institution**
+#   - **Fields**
+#   - **Main Field**
+#   - **Deadline**
+#   - **University**
+#   - **Program Type**
+#   - **Publication Date**
+#
+# - **How It Works:**
+#   1. **Subject Creation:**
+#      The function extracts university names from each job record. If there's only one record, it uses that university name; if multiple, it joins all unique names.
+#
+#   2. **HTML Table Construction:**
+#      An HTML table is built with one row per job record, ensuring that links are rendered as clickable hyperlinks.
+#
+#   3. **Email Assembly:**
+#      The email is composed as a multipart message with both plain text and HTML parts.
+#
+#   4. **Sending the Email:**
+#      Using Python's `smtplib`, the function logs in to the SMTP server (defaulting to Gmail) and sends the email.
+#
+#
 
-def replace_none_or_empty_in_dict(d):
+
+# %%
+def replace_none_or_empty_in_list_of_dicts(jobs):
     """
-    Returns a new dictionary where None or empty-string/whitespace
-    values are replaced with 'N/A'.
+    Ensures all job dictionaries have consistent formatting:
+    - Replace None or empty values with "N/A"
+    - Strip extra whitespace
+    - Convert to lowercase for consistency
     """
-    new_dict = {}
-    for k, v in d.items():
-        if v is None or (isinstance(v, str) and v.strip() == ""):
-            new_dict[k] = "N/A"
-        else:
-            new_dict[k] = v
-    return new_dict
+    cleaned_jobs = []
+    for job in jobs:
+        cleaned_job = {
+            str(k).strip().lower(): str(v).strip() if v and v.strip() else "N/A"
+            for k, v in job.items()
+        }
+        cleaned_jobs.append(cleaned_job)
+    return cleaned_jobs
 
 
-def replace_none_or_empty_in_list_of_dicts(records):
+def read_existing_jobs(xml_file):
     """
-    Takes a list of dictionaries and replaces None or empty strings in each dictionary
-    with 'N/A'.
+    Reads existing job entries from XML and returns a dictionary of frozenset job signatures,
+    categorized by 'source' (e.g., Predoc, NBER, EJM).
+
+    If the XML file does not exist, returns an empty dictionary.
     """
-    return [replace_none_or_empty_in_dict(job) for job in records]
+    existing_signatures = {}
 
+    if os.path.exists(xml_file):
+        tree = ET.parse(xml_file)
+        root = tree.getroot()
 
-def read_existing_jobs(csv_file):
-    """
-    Reads the CSV file and returns a set of row 'signatures' for all recorded jobs.
-    A row signature is a frozenset of (key, value) pairs.
-    If the file does not exist, returns an empty set.
+        for entry in root.findall("entry"):
+            job_data = {
+                child.tag.strip(): child.text.strip() if child.text else "N/A"
+                for child in entry
+            }
+            job_signature = frozenset(
+                sorted(job_data.items())
+            )  # Sort keys to ensure consistency
 
-    Records are considered duplicates only if *all* fields match exactly.
-    """
-    existing_signatures = set()
+            source = job_data.get("source", "Unknown")  # Extract source
 
-    if os.path.exists(csv_file):
-        with open(csv_file, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                # Convert the row dict into a frozenset of (key, value) pairs
-                # to be hashable for set membership checks.
-                # This ensures that if any field differs, the record is considered new.
-                row_signature = frozenset(row.items())
-                existing_signatures.add(row_signature)
+            if source not in existing_signatures:
+                existing_signatures[source] = (
+                    set()
+                )  # Create a set for this source if it doesn’t exist
+
+            existing_signatures[source].add(
+                job_signature
+            )  # Store the signature under the correct source
+
+    print("\n🔍 Debug: Existing Job Signatures by Source from XML")
+    for src, sigs in existing_signatures.items():
+        print(f"📁 {src}: {len(sigs)} jobs stored")
 
     return existing_signatures
 
 
-def merge_ejm_and_other(ejm_jobs, other_jobs):
+def append_jobs_to_xml(xml_file, jobs):
     """
-    Merges two lists of dictionaries:
-      1) ejm_jobs, which may have columns (source, program_title, location, start_date, duration, department, university, program_type, fields, publication_date, deadline, sponsor, institution, main_field, degree_required, salary_range, link)
-      2) other_jobs, which may have columns (source, program_title, sponsor, institution, fields, program_type, main_field, link, deadline, publication_date)
+    Saves a list of job dictionaries into an XML file.
 
-    Returns a single list of dictionaries with all columns (17 total). Missing fields are filled with None.
+    - If the file does not exist, it creates a new XML structure.
+    - If the file exists, it appends only new job entries while avoiding duplicates.
     """
-    # 1. Combine the two lists
-    all_jobs = ejm_jobs + other_jobs
-
-    # 2. Identify all columns from both EJM and Other
-    # (Listed explicitly here for clarity; or you can dynamically collect them from the data.)
-    all_columns = {
-        "source",
-        "program_title",
-        "location",
-        "start_date",
-        "duration",
-        "department",
-        "university",
-        "program_type",
-        "fields",
-        "publication_date",
-        "deadline",
-        "sponsor",
-        "institution",
-        "main_field",
-        "degree_required",
-        "salary_range",
-        "link",
-    }
-
-    # 3. Ensure each dictionary has all columns, filling missing ones with None
-    for job in all_jobs:
-        for col in all_columns:
-            if col not in job:
-                job[col] = "N\A"
-
-    return all_jobs
-
-
-def append_jobs_to_csv(csv_file, jobs, fieldnames=None):
-    """
-    Appends the list of job dictionaries to the CSV file.
-    If the file does not exist, it is created with a header.
-    If it does exist, we unify any new columns from the new jobs with the existing CSV columns.
-    Then we rewrite the entire CSV with the union of all columns (no data is lost).
-    """
-    # 1) Read existing rows (if the file exists).
-    if os.path.exists(csv_file):
-        with open(csv_file, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            existing_rows = list(reader)
+    # Load existing XML or create a new root if the file doesn't exist
+    if os.path.exists(xml_file):
+        tree = ET.parse(xml_file)
+        root = tree.getroot()
     else:
-        existing_rows = []
+        root = ET.Element("jobs")  # Create root element
 
-    # 2) Collect all columns from existing rows and new jobs
-    existing_cols = {col for row in existing_rows for col in row.keys()}
-    new_cols = {col for row in jobs for col in row.keys()}
-    all_cols = existing_cols.union(new_cols)
+    # Read existing jobs to avoid duplicates
+    existing_signatures = read_existing_jobs(xml_file)
 
-    # 3) Fill missing columns with "N/A" for existing rows
-    for row in existing_rows:
-        for col in all_cols:
-            if col not in row:
-                row[col] = "N/A"
+    new_entries_count = 0  # Track new records added
 
-    # 4) Fill missing columns with "N/A" for new jobs
     for job in jobs:
-        for col in all_cols:
-            if col not in job:
-                job[col] = "N/A"
+        # Convert job dict into a frozenset signature
+        job_str_dict = {
+            str(k).strip(): str(v).strip() for k, v in job.items() if v != "N/A"
+        }
+        job_signature = frozenset(sorted(job_str_dict.items()))
 
-    # 5) Merge the old and new rows
-    merged_data = existing_rows + jobs
+        if job_signature not in existing_signatures:
+            # This is a new job! Add it to XML.
+            entry = ET.SubElement(root, "entry")
 
-    # 6) Write the entire CSV back (overwrite) with the union of all columns
-    with open(csv_file, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(all_cols))
-        writer.writeheader()
-        for row in merged_data:
-            writer.writerow(row)
+            for key, value in job.items():
+                field = ET.SubElement(entry, key)
+                field.text = value if value.strip() else "N/A"  # Ensure no empty values
+
+            new_entries_count += 1
+
+    # Only save if new entries were added
+    if new_entries_count > 0:
+        tree = ET.ElementTree(root)
+        tree.write(xml_file, encoding="utf-8", xml_declaration=True)
+        print(f"✅ {new_entries_count} new job(s) added to {xml_file}")
+    else:
+        print("🔹 No new jobs found; XML file remains unchanged.")
 
 
 def send_email_new_jobs(
@@ -702,9 +900,6 @@ def send_email_new_jobs(
     The email body is an HTML table containing one row per job record.
     Clickable hyperlinks are created for the job links.
     """
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
 
     # Extract university names from the new jobs (ignoring "N/A")
     universities = [
@@ -796,70 +991,110 @@ def send_email_new_jobs(
         print("Failed to send email:", e)
 
 
-def main():
-    # Scrape jobs from each source into separate lists.
-    predoc_jobs = scrape_predoc()  # list of dicts
-    nber_jobs = scrape_nber()  # list of dicts
-    ejm_jobs = scrape_ejm()  # list of dicts
+def find_new_jobs():
+    """
+    Scrapes jobs from each source, checks for duplicates using XML storage,
+    and returns a list of newly detected jobs.
+    """
+    # Scrape jobs from each source.
+    predoc_jobs = scrape_predoc()
+    nber_jobs = scrape_nber()
+    ejm_jobs = scrape_ejm()
 
-    # Merge the three lists of dictionaries into a single list.
-    all_jobs = merge_job_data(predoc_jobs, nber_jobs, ejm_jobs)
+    # Combine all job records into a single list.
+    all_jobs = predoc_jobs + nber_jobs + ejm_jobs
     all_jobs = replace_none_or_empty_in_list_of_dicts(all_jobs)
 
-    # Check if any jobs were scraped. 🚨
     if not all_jobs:
         print("No jobs were scraped.")
-        return
+        return []
 
-    # Read existing row signatures from CSV (checks all fields, not just 'link'). 📂
-    existing_signatures = read_existing_jobs(CSV_FILE)
+    # Read existing job signatures from XML.
+    existing_signatures = read_existing_jobs(XML_FILE)
 
-    # Filter out jobs that match an existing signature exactly. 🔍
+    print("\n🔍 Debug: Checking New Jobs Against Filtered Existing Records")
+
     new_jobs = []
     for job in all_jobs:
-        # Convert the job into a consistent set of (key, value) pairs,
-        # ignoring "N/A" fields, for consistent signature matching.
-        job_str_dict = {}
-        for k, v in job.items():
-            if v is None or v == "N/A":
-                job_str_dict[str(k)] = "N/A"  # unify your missing val
-            else:
-                job_str_dict[str(k)] = str(v)
-        job_signature = frozenset(job_str_dict.items())
+        job_str_dict = {
+            str(k).strip().lower(): str(v).strip() if v and v.strip() else "N/A"
+            for k, v in job.items()
+        }
+        job_signature = frozenset(sorted(job_str_dict.items()))
 
-        if job_signature not in existing_signatures:
+        # Use `source` to filter existing records before comparison
+        job_source = job.get("source", "Unknown")
+
+        if (
+            job_source in existing_signatures
+            and job_signature in existing_signatures[job_source]
+        ):
+            print(f"✅ Job Already Exists in XML ({job_source})")
+        else:
+            print(f"❌ New Job Detected! Adding to list. ({job_source})")
             new_jobs.append(job)
 
-    print(f"Found {len(new_jobs)} new job(s).")
+    print(f"\nFound {len(new_jobs)} new job(s).")
+    return new_jobs  # Return list of new jobs
+
+
+# %% [markdown]
+# ## Main Function: Scrape, Update, and Notify 🚀📊✉️
+#
+# This **main()** function orchestrates the complete workflow of the project. It:
+#
+# - **Scrapes Job Data:**
+#   Calls the scraping functions for all three sources (Predoc, NBER, EJM) to collect job postings.
+#
+# - **Filters New Jobs:**
+#   Reads an existing CSV file (acting as a simple database) to get a set of already recorded job links. Then, it filters out jobs that are already present.
+#
+# - **Sends Notifications:**
+#   For each new job found, the function sends an email notification with the job details.
+#
+# - **Updates the CSV Database:**
+#   Finally, it appends the new job entries to the CSV file for future reference.
+#
+# > **Note:**
+# > Ensure that your SMTP credentials (i.e. `SENDER_EMAIL` and `SENDER_PASSWORD`) are set up and that the scraping functions (`scrape_predoc()`, `scrape_nber()`, and `scrape_ejm()`) along with CSV and email helper functions are defined before running `main()`.
+
+
+# %%
+def main():
+    """
+    Main execution function. Calls find_new_jobs, saves new jobs to XML,
+    and optionally sends email notifications.
+    """
+    new_jobs = find_new_jobs()  # Call the new function
 
     if new_jobs:
+        # Save new jobs to XML instead of CSV. 💾
+        append_jobs_to_xml(XML_FILE, new_jobs)
+
         # Retrieve SMTP credentials from environment variables. 🔒
         sender_email = os.getenv("SENDER_EMAIL")
         sender_password = os.getenv("SENDER_PASSWORD")
         receiver_email = os.getenv("SENDER_EMAIL")
 
-        # Convert the new jobs to a Pandas DataFrame for easy visualization. 📈
+        # Convert new jobs to a DataFrame for better visualization.
         df_new = pd.DataFrame(new_jobs).head(10)
         md_table = df_new.to_markdown(index=False)
 
-        # Merge these new records with the CSV, automatically unifying columns.
-        append_jobs_to_csv(CSV_FILE, new_jobs)
-
-        # Optionally send email notifications for new records.
-        # send_email_new_jobs(new_jobs, sender_email, sender_password, receiver_email)
+        # Uncomment to send email notifications
+        send_email_new_jobs(new_jobs, sender_email, sender_password, receiver_email)
 
     else:
-        # If no new jobs were found, print a message and display up to 10 existing records.
         print("No new jobs found.")
-        if os.path.exists(CSV_FILE):
-            df_new = pd.read_csv(CSV_FILE).head(10)
+        if os.path.exists(XML_FILE):
+            df_new = pd.read_xml(XML_FILE).head(10)
             md_table = df_new.to_markdown(index=False)
         else:
-            md_table = "No CSV file found."
+            md_table = "No XML file found."
 
-    # Display the table in the notebook (new records or existing CSV).
+    # Display the table in the notebook (either new jobs or existing XML).
     display(Markdown(md_table))
 
 
+# %%
 if __name__ == "__main__":
     main()

@@ -1,11 +1,16 @@
 name: ra
 channels:
   - defaults
+  - conda-forge
 dependencies:
   - python=3.12
   - requests
   - beautifulsoup4
-  - panda
-  - smtplib
-  - dotenv
-  - tabulate
+  - pandas  # Fixed typo (was "panda")
+  - smtplib  # This is part of the Python standard library, no need to install separately
+  - python-dotenv  # Correct name for "dotenv"
+  - tabulate  # For formatting tables
+  - xmltodict  # For easier XML parsing (ET module is part of the Python standard library)
+  - lxml  # Faster XML and HTML parsing
+  - certifi  # Ensures proper SSL verification
+  - ipython  # For Jupyter/IPython compatibility (optional)
