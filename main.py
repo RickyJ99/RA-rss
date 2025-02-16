@@ -22,6 +22,8 @@ from email.mime.multipart import MIMEMultipart  # For handling email attachments
 from IPython.display import Markdown, display  # For displaying tables in Jupyter
 from dotenv import load_dotenv  # For loading environment variables
 import urllib3  # For managing HTTP connections
+from jinja2 import Environment, FileSystemLoader
+import datetime
 import subprocess
 
 # Suppress SSL warnings for sites with invalid certificates (if necessary)
@@ -38,6 +40,14 @@ NBER_URL = "https://www.nber.org/career-resources/research-assistant-positions-n
 EJM_URL = "https://econjobmarket.org/market"
 XML_FILE = "jobs.xml"
 
+# Define your GitHub repository link
+GITHUB_REPO_URL = "https://github.com/RickyJ99/RA-rss"
+GITHUB_ISSUE_URL = f"{GITHUB_REPO_URL}/issues"
+
+# %% [markdown]
+# ## Downloading the html
+# The following functions are downloading the HTML content from the sources and it save it in the foulder sources.
+# For PREDOC there is a issue with certificate so it is easy to use curl (bash MacOS)
 
 # %% [markdown]
 # ## Downloading the html
@@ -892,78 +902,33 @@ def send_email_new_jobs(
     smtp_port=587,
 ):
     """
-    Sends an email with new job records.
+    Sends an email with new job records using an HTML template.
 
-    If there is a single record, the email subject is set to the university name from that record.
-    If there are multiple records, the subject lists the unique university names (comma-separated).
-
-    The email body is an HTML table containing one row per job record.
-    Clickable hyperlinks are created for the job links.
+    - Uses Jinja2 for templating.
+    - Loads the email HTML template from `templates/email.html`.
+    - Displays "Apply" buttons instead of raw links.
+    - Shows the latest update timestamp.
+    - Provides links to contribute or report issues on GitHub.
     """
 
-    # Extract university names from the new jobs (ignoring "N/A")
-    universities = [
-        str(u)
-        for u in (job.get("university") for job in new_jobs)
-        if u != "N/A" and u != "N/A"
-    ]
-    subject = ", ".join(universities) if universities else "New Research Positions"
-    # Construct the HTML table for the email body
-    html_body = """
-    <html>
-      <head>
-        <style>
-          table, th, td {
-            border: 1px solid #ddd;
-            border-collapse: collapse;
-            padding: 8px;
-          }
-          th {
-            background-color: #f2f2f2;
-          }
-        </style>
-      </head>
-      <body>
-        <p>New Research Positions Found:</p>
-        <table>
-          <tr>
-            <th>Source</th>
-            <th>Program Title</th>
-            <th>Link</th>
-            <th>Sponsor</th>
-            <th>Institution</th>
-            <th>Fields</th>
-            <th>Main Field</th>
-            <th>Deadline</th>
-            <th>University</th>
-            <th>Program Type</th>
-            <th>Publication Date</th>
-          </tr>
-    """
-    for job in new_jobs:
-        link = job.get("link", "")
-        # Make the link clickable if available
-        clickable_link = f'<a href="{link}">{link}</a>' if link else "N/A"
-        html_body += f"""
-          <tr>
-            <td>{job.get("source", "N/A")}</td>
-            <td>{job.get("program_title", "N/A")}</td>
-            <td>{clickable_link}</td>
-            <td>{job.get("sponsor", "N/A")}</td>
-            <td>{job.get("institution", "N/A")}</td>
-            <td>{job.get("fields", "N/A")}</td>
-            <td>{job.get("main_field", "N/A")}</td>
-            <td>{job.get("deadline", "N/A")}</td>
-            <td>{job.get("university", "N/A")}</td>
-            <td>{job.get("program_type", "N/A")}</td>
-            <td>{job.get("publication_date", "N/A")}</td>
-          </tr>
-        """
-    html_body += """
-        </table>
-      </body>
-    </html>
-    """
+    # Count new jobs for the email subject
+    num_jobs = len(new_jobs)
+    subject = f"New Job Opportunities Found ({num_jobs})"
+
+    # Get the current date & time
+    update_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Load the email template using Jinja2
+    env = Environment(loader=FileSystemLoader("templates"))
+    template = env.get_template("email.html")
+
+    # Render the template with dynamic values
+    html_body = template.render(
+        new_jobs=new_jobs,
+        update_time=update_time,
+        github_repo_url=GITHUB_REPO_URL,
+        github_issue_url=GITHUB_ISSUE_URL,
+    )
 
     # Create a multipart email message (plain text and HTML)
     msg = MIMEMultipart("alternative")
@@ -971,8 +936,8 @@ def send_email_new_jobs(
     msg["From"] = sender_email
     msg["To"] = receiver_email
 
-    # Plain text version as fallback
-    text_body = "New Research Positions Found. Please view this email in an HTML-compatible client."
+    # Plain text fallback
+    text_body = f"{num_jobs} new research positions found. Please view this email in an HTML-compatible client."
 
     part1 = MIMEText(text_body, "plain")
     part2 = MIMEText(html_body, "html")
@@ -1036,6 +1001,66 @@ def find_new_jobs():
 
     print(f"\nFound {len(new_jobs)} new job(s).")
     return new_jobs  # Return list of new jobs
+
+
+def debug_email_with_existing_jobs(existing_jobs):
+    """
+    Debug function to render the email using existing jobs.
+    """
+    from jinja2 import Environment, FileSystemLoader
+    import datetime
+
+    # Flatten jobs from all sources into a single list
+    all_jobs = []
+    for source, jobs in existing_jobs.items():
+        for job in jobs:
+            # Convert frozenset back to dict if necessary
+            if isinstance(job, frozenset):
+                job = dict(job)
+            all_jobs.append(job)
+
+    if not all_jobs:
+        print("⚠️ No existing jobs found in the XML file.")
+        return
+
+    # Take only the first 5 jobs for debugging
+    sample_jobs = all_jobs[:5]
+
+    print("\n🔍 DEBUG: First 5 Jobs for Email Rendering")
+    for job in sample_jobs:
+        print(job)
+
+    # Load the email template using Jinja2
+    env = Environment(loader=FileSystemLoader("templates"))
+    template = env.get_template("email.html")
+
+    # Get the current timestamp
+    update_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Render the email with the sample job data
+    email_content = template.render(
+        new_jobs=sample_jobs,
+        update_time=update_time,
+        github_repo_url="https://github.com/your_repo",
+        github_issue_url="https://github.com/your_repo/issues",
+    )
+
+    print("\n📝 DEBUG: Rendered Email Content (Raw HTML):\n", email_content)
+
+    # Save the output to a file for testing
+    with open("debug_email_output.html", "w", encoding="utf-8") as f:
+        f.write(email_content)
+
+    print(
+        "\n✅ Email template successfully rendered and saved as 'debug_email_output.html'."
+    )
+
+
+# Load existing jobs from XML (assuming you have a function for this)
+# existing_jobs = read_existing_jobs(XML_FILE)
+
+# Call the debug function
+# debug_email_with_existing_jobs(existing_jobs)
 
 
 # %% [markdown]

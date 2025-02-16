@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        th,
+        td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f4f4f4;
+        }
+
+        .apply-btn {
+            display: inline-block;
+            background-color: #4CAF50;
+            color: white;
+            padding: 5px 10px;
+            text-decoration: none;
+            font-size: 12px;
+            border-radius: 5px;
+        }
+
+        .footer {
+            margin-top: 20px;
+            padding: 10px;
+            font-size: 12px;
+            background-color: #f9f9f9;
+            border-top: 1px solid #ddd;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>New Research Positions Found</h2>
+    <p><strong>Updated:</strong> {{ update_time }}</p>
+    <table>
+        <tr>
+            <th>Source</th>
+            <th>Program Title</th>
+            <th>Apply</th>
+            <th>Sponsor</th>
+            <th>Institution</th>
+            <th>Fields</th>
+            <th>Main Field</th>
+            <th>Deadline</th>
+            <th>University</th>
+            <th>Program Type</th>
+            <th>Publication Date</th>
+        </tr>
+        {% for job in new_jobs %}
+        <tr>
+            <td>
+                {% if job.link %}
+                <a href="{{ job.link }}" target="_blank">{{ job.source }}</a>
+                {% else %}
+                {{ job.source }}
+                {% endif %}
+            </td>
+            <td>{{ job.program_title }}</td>
+            <td>
+                {% if job.link %}
+                <a href="{{ job.link }}" class="apply-btn" target="_blank">Apply</a>
+                {% else %}
+                N/A
+                {% endif %}
+            </td>
+            <td>{{ job.sponsor }}</td>
+            <td>{{ job.institution }}</td>
+            <td>{{ job.fields }}</td>
+            <td>{{ job.main_field }}</td>
+            <td>
+                {% if "rolling" in job.deadline.lower() %}
+                Rolling
+                {% else %}
+                {{ job.deadline }}
+                {% endif %}
+            </td>
+            <td>{{ job.university }}</td>
+            <td>{{ job.program_type }}</td>
+            <td>{{ job.publication_date }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <div class="footer">
+        <p>This is an open-source project. If you'd like to contribute, visit our <a href="{{ github_repo_url }}"
+                target="_blank">GitHub Repository</a>.</p>
+        <p>If you encounter any
