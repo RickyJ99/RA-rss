@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Listings</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+
+        .table {
+            color: #e0e0e0;
+        }
+
+        .table-striped tbody tr:nth-of-type(odd) {
+            background-color: #1e1e1e;
+        }
+
+        .table-striped tbody tr:nth-of-type(even) {
+            background-color: #292929;
+        }
+
+        .table thead {
+            background-color: #333;
+        }
+
+        .table th a {
+            color: #ffffff;
+            text-decoration: none;
+        }
+
+        .table th a:hover {
+            text-decoration: underline;
+        }
+
+        .btn-primary {
+            background-color: #bb86fc;
+            border-color: #bb86fc;
+        }
+
+        .btn-primary:hover {
+            background-color: #9b67f3;
+            border-color: #9b67f3;
+        }
+
+        .alert-warning {
+            background-color: #ffcc00;
+            color: black;
+        }
+
+        a {
+            color: #bb86fc;
+        }
+
+        a:hover {
+            color: #d4a4ff;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1 class="mb-4 text-center">💼 Job Listings (Dark Mode) 🌙</h1>
+
+        <!-- Search Form -->
+        <form method="GET" class="mb-3">
+            <div class="input-group">
+                <input type="text" name="search" class="form-control bg-dark text-light border-secondary"
+                    placeholder="🔍 Search by job title..." value="{{ search_query }}">
+                <button class="btn btn-primary" type="submit">Search</button>
+            </div>
+        </form>
+
+        <!-- Table -->
+        <table class="table table-striped table-dark">
+            <thead>
+                <tr>
+                    <th><a href="?sort=source&order={{ 'asc' if order == 'desc' else 'desc' }}">Source</a></th>
+                    <th><a href="?sort=program_title&order={{ 'asc' if order == 'desc' else 'desc' }}">Program Title</a>
+                    </th>
+                    <th><a href="?sort=sponsor&order={{ 'asc' if order == 'desc' else 'desc' }}">Sponsor</a></th>
+                    <th><a href="?sort=institution&order={{ 'asc' if order == 'desc' else 'desc' }}">Institution</a>
+                    </th>
+                    <th><a href="?sort=program_type&order={{ 'asc' if order == 'desc' else 'desc' }}">Program Type</a>
+                    </th>
+                    <th><a href="?sort=main_field&order={{ 'asc' if order == 'desc' else 'desc' }}">Main Field</a></th>
+                    <th><a href="?sort=link&order={{ 'asc' if order == 'desc' else 'desc' }}">Link</a></th>
+                    <th><a href="?sort=deadline&order={{ 'asc' if order == 'desc' else 'desc' }}">Deadline</a></th>
+                    <th><a href="?sort=publication_date&order={{ 'asc' if order == 'desc' else 'desc' }}">Publication
+                            Date</a></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in jobs %}
+                <tr>
+                    <td>{{ job.source }}</td>
+                    <td>{{ job.program_title }}</td>
+                    <td>{{ job.sponsor }}</td>
+                    <td>{{ job.institution }}</td>
+                    <td>{{ job.program_type }}</td>
+                    <td>{{ job.main_field }}</td>
+                    <td><a href="{{ job.link }}" target="_blank">🌍 Apply</a></td>
+                    <td>{{ job.deadline }}</td>
+                    <td>{{ job.publication_date }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if not jobs %}
+        <div class="alert alert-warning text-center">⚠️ No job data available. Please check the XML file.</div>
+        {% endif %}
+    </div>
+</body>
+
+</html>

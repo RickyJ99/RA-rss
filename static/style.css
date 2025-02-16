@@ -1,0 +1,52 @@
+body {
+    background-color: #121212;
+    color: #e0e0e0;
+}
+
+.table {
+    color: #e0e0e0;
+}
+
+.table-striped tbody tr:nth-of-type(odd) {
+    background-color: #1e1e1e;
+}
+
+.table-striped tbody tr:nth-of-type(even) {
+    background-color: #292929;
+}
+
+.table thead {
+    background-color: #333;
+}
+
+.table th a {
+    color: #ffffff;
+    text-decoration: none;
+}
+
+.table th a:hover {
+    text-decoration: underline;
+}
+
+.btn-primary {
+    background-color: #bb86fc;
+    border-color: #bb86fc;
+}
+
+.btn-primary:hover {
+    background-color: #9b67f3;
+    border-color: #9b67f3;
+}
+
+.alert-warning {
+    background-color: #ffcc00;
+    color: black;
+}
+
+a {
+    color: #bb86fc;
+}
+
+a:hover {
+    color: #d4a4ff;
+}
