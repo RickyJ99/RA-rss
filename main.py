@@ -24,6 +24,8 @@ from dotenv import load_dotenv  # For loading environment variables
 import urllib3  # For managing HTTP connections
 from jinja2 import Environment, FileSystemLoader
 import datetime
+import csv
+import pprint
 import subprocess
 
 # Suppress SSL warnings for sites with invalid certificates (if necessary)
@@ -39,7 +41,7 @@ PREDOC_URL = "https://predoc.org/opportunities"
 NBER_URL = "https://www.nber.org/career-resources/research-assistant-positions-not-nber"
 EJM_URL = "https://econjobmarket.org/market"
 XML_FILE = "jobs.xml"
-
+csv_file_path = "subscribers.csv"
 # Define your GitHub repository link
 GITHUB_REPO_URL = "https://github.com/RickyJ99/RA-rss"
 GITHUB_ISSUE_URL = f"{GITHUB_REPO_URL}/issues"
@@ -87,6 +89,59 @@ os.makedirs("sources", exist_ok=True)
 download_html(PREDOC_URL, "sources/predoc.html")
 download_html(NBER_URL, "sources/nber.html")
 download_html(EJM_URL, "sources/ejm.html")
+
+
+def read_preferences(csv_file):
+    """
+    Reads a CSV file containing names, emails, preferences, and universities.
+
+    Expected CSV Format:
+    name, email, preferences, university
+    -------------------------------------
+    John Doe, johndoe@example.com, Microeconomics/Labor Economics/Development, Harvard University
+    Jane Smith, janesmith@example.com, Macroeconomics/Finance, MIT
+    Harry, harry@example.com, ,
+
+    :param csv_file: Path to the CSV file.
+    :return: List of dictionaries with extracted data.
+    """
+    preferences_list = []
+
+    try:
+        with open(csv_file, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+
+            for row in reader:
+                # Extract values, ensuring no leading/trailing spaces
+                name = row.get("name", "").strip()
+                email = row.get("email", "").strip()
+                university = (
+                    row.get("university", "").strip() if "university" in row else "N/A"
+                )
+
+                # Handle preferences correctly, splitting by "/" and cleaning up empty values
+                raw_preferences = row.get("preferences", "").strip()
+                preferences = (
+                    [p.strip() for p in raw_preferences.split("/") if p.strip()]
+                    if raw_preferences
+                    else ["N/A"]
+                )
+
+                if name and email:
+                    preferences_list.append(
+                        {
+                            "name": name,
+                            "email": email,
+                            "preferences": preferences if preferences else "N/A",
+                            "university": university if university else "N/A",
+                        }
+                    )
+
+        return preferences_list
+
+    except Exception as e:
+        print(f"Error reading CSV file: {e}")
+        return []
 
 
 # %% [markdown]
@@ -897,23 +952,27 @@ def send_email_new_jobs(
     new_jobs,
     sender_email,
     sender_password,
-    receiver_email,
+    subscribers,
     smtp_server="smtp.gmail.com",
     smtp_port=587,
 ):
     """
-    Sends an email with new job records using an HTML template.
+    Sends personalized job update emails to each subscriber based on their preferences.
 
     - Uses Jinja2 for templating.
-    - Loads the email HTML template from `templates/email.html`.
-    - Displays "Apply" buttons instead of raw links.
-    - Shows the latest update timestamp.
+    - Loads email HTML template from `templates/email.html`.
+    - Includes "Apply" buttons instead of raw links.
+    - Displays the latest update timestamp.
     - Provides links to contribute or report issues on GitHub.
-    """
 
-    # Count new jobs for the email subject
-    num_jobs = len(new_jobs)
-    subject = f"New Job Opportunities Found ({num_jobs})"
+    Parameters:
+        new_jobs (list): List of dictionaries containing new job data.
+        sender_email (str): Email address used to send emails.
+        sender_password (str): App password for authentication.
+        subscribers (list of dicts): List of subscriber dictionaries with 'name', 'email', and 'preferences'.
+        smtp_server (str): SMTP server address (default: "smtp.gmail.com").
+        smtp_port (int): SMTP server port (default: 587).
+    """
 
     # Get the current date & time
     update_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -922,38 +981,57 @@ def send_email_new_jobs(
     env = Environment(loader=FileSystemLoader("templates"))
     template = env.get_template("email.html")
 
-    # Render the template with dynamic values
-    html_body = template.render(
-        new_jobs=new_jobs,
-        update_time=update_time,
-        github_repo_url=GITHUB_REPO_URL,
-        github_issue_url=GITHUB_ISSUE_URL,
-    )
+    for subscriber in subscribers:
+        recipient_name = subscriber.get("name", "Subscriber")
+        recipient_email = subscriber.get("email")
+        preferences = subscriber.get("preferences", "")
 
-    # Create a multipart email message (plain text and HTML)
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = sender_email
-    msg["To"] = receiver_email
+        if not recipient_email:
+            continue  # Skip if email is missing
 
-    # Plain text fallback
-    text_body = f"{num_jobs} new research positions found. Please view this email in an HTML-compatible client."
+        filtered_jobs = new_jobs  # No filter applied if preferences are empty
 
-    part1 = MIMEText(text_body, "plain")
-    part2 = MIMEText(html_body, "html")
+        # Skip sending email if no relevant jobs for this user
+        if not filtered_jobs:
+            continue
 
-    msg.attach(part1)
-    msg.attach(part2)
+        # Count filtered jobs for the subject line
+        num_jobs = len(filtered_jobs)
+        subject = f"New Job Opportunities Found ({num_jobs})"
 
-    # Send the email via SMTP
-    try:
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()  # Secure the connection
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-        print("Email sent successfully!")
-    except Exception as e:
-        print("Failed to send email:", e)
+        # Render the email with personalized details
+        html_body = template.render(
+            recipient_name=recipient_name,
+            new_jobs=filtered_jobs,
+            update_time=update_time,
+            github_repo_url=GITHUB_REPO_URL,
+            github_issue_url=GITHUB_ISSUE_URL,
+        )
+
+        # Create a multipart email message (plain text and HTML)
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = sender_email
+        msg["To"] = recipient_email
+
+        # Plain text fallback
+        text_body = f"Hello {recipient_name},\n\nWe found {num_jobs} new research assistant or pre-doctoral positions that match your interests.\nPlease view this email in an HTML-compatible client to see the job listings with 'Apply' buttons."
+
+        part1 = MIMEText(text_body, "plain")
+        part2 = MIMEText(html_body, "html")
+
+        msg.attach(part1)
+        msg.attach(part2)
+
+        # Send the email via SMTP
+        try:
+            with smtplib.SMTP(smtp_server, smtp_port) as server:
+                server.starttls()  # Secure the connection
+                server.login(sender_email, sender_password)
+                server.send_message(msg)
+            print(f"✅ Email sent successfully to {recipient_email}!")
+        except Exception as e:
+            print(f"❌ Failed to send email to {recipient_email}: {e}")
 
 
 def find_new_jobs():
@@ -1099,14 +1177,14 @@ def main():
         # Retrieve SMTP credentials from environment variables. 🔒
         sender_email = os.getenv("SENDER_EMAIL")
         sender_password = os.getenv("SENDER_PASSWORD")
-        receiver_email = os.getenv("SENDER_EMAIL")
+        subscribers = read_preferences(csv_file_path)
 
         # Convert new jobs to a DataFrame for better visualization.
         df_new = pd.DataFrame(new_jobs).head(10)
         md_table = df_new.to_markdown(index=False)
 
         # Uncomment to send email notifications
-        send_email_new_jobs(new_jobs, sender_email, sender_password, receiver_email)
+        send_email_new_jobs(new_jobs, sender_email, sender_password, subscribers)
 
     else:
         print("No new jobs found.")
